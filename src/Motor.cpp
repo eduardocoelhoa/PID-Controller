@@ -11,8 +11,8 @@ void Motor::begin() {
     pinMode(pinDir1, OUTPUT);
     pinMode(pinDir2, OUTPUT);
 
-    // Configuração do PWM para o ESP32 (Frequência de 5kHz, resolução de 8 bits: 0 a 255)
-    ledcSetup(pwmChannel, 5000, 8);
+    // Configuração do PWM para o ESP32 (Frequência de 5kHz, resolução de 12 bits: 0 a 4095)
+    ledcSetup(pwmChannel, 5000, 12);
     ledcAttachPin(pinPWM, pwmChannel);
     
     stop(); // Garante que inicie desligado
@@ -33,7 +33,7 @@ void Motor::setSpeed(int speed) {
     }
 
     // Limita o valor de speed para o intervalo permitido
-    constrain(speed, -255, 255); 
+    constrain(speed, -4095, 4095); 
     // Aplica o sinal PWM
     ledcWrite(pwmChannel, abs(speed));
 }
