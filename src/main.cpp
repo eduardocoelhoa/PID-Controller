@@ -1,109 +1,127 @@
 #include <Arduino.h>
-#include <FS.h>
-#include <SPIFFS.h>
 #include "Encoder.h"
 #include "Motor.h"
 #include "Orchestrator.h"
 #include "Constants.h"
 
-Encoder encoder(PPR, WHEEL_RADIUS_M, PCNT_UNIT, PCNT_CHANNEL, PIN_ENC_A, PIN_ENC_B);
+// =========================================================================
+//  INSTÂNCIAS GLOBAIS
+// =========================================================================
+Encoder encoder(PPR, PCNT_UNIT, PCNT_CHANNEL, PIN_ENC_A, PIN_ENC_B);
 Motor motor(PIN_PWM, PIN_DIR1, PIN_DIR2, PWM_CHANNEL);
 Orchestrator orchestrator(encoder, motor);
-bool stepActive = false;
-bool stepLogRequested = false;
-bool stepLogOk = false;
-bool spiffsOk = false;
 
+// Tipo de teste ativo (nenhum, frequência ou degrau)
+enum TestType { TEST_NONE, TEST_FREQ, TEST_STEP };
+TestType activeTest = TEST_NONE;
+
+// Parâmetros configuráveis via serial (valores padrão)
+int stepPwm = STEP_PWM;
+unsigned long stepDurationMs = STEP_DURATION_MS;
+int freqOffsetPwm = OFFSET_PWM;
+int freqAmplitudePwm = AMPLITUDE_PWM;
+float freqHz = FREQ_HZ;
+unsigned long freqDurationMs = FREQ_DURATION_MS;
+
+// =========================================================================
+//  setup
+// =========================================================================
 void setup() {
-  Serial.begin(115200);
-	spiffsOk = SPIFFS.begin(true);
-	if (!spiffsOk) {
-		Serial.println("Falha ao montar SPIFFS");
-	}
-	Serial.println("Teste de resposta ao degrau: envie 's' para iniciar.");
-	Serial.printf("PWM=%d, Duracao=%lu ms\n", STEP_PWM, STEP_DURATION_MS);
+    Serial.begin(BAUD_RATE);
 }
 
+// =========================================================================
+//  parseParams
+//  Lê parâmetros de uma string no formato "pwm,duracao" ou
+//  "offset,amplitude,freq,duracao". Retorna true se parseou com sucesso.
+// =========================================================================
+bool parseStepParams(const String& params) {
+    int commaIdx = params.indexOf(',');
+    if (commaIdx < 0) return false;
+
+    stepPwm = constrain(params.substring(0, commaIdx).toInt(), 0, PWM_MAX);
+    stepDurationMs = params.substring(commaIdx + 1).toInt() * 1000UL;
+    return stepDurationMs > 0;
+}
+
+bool parseFreqParams(const String& params) {
+    // Formato: "offset,amplitude,freq,duracao"
+    int idx1 = params.indexOf(',');
+    if (idx1 < 0) return false;
+    int idx2 = params.indexOf(',', idx1 + 1);
+    if (idx2 < 0) return false;
+    int idx3 = params.indexOf(',', idx2 + 1);
+    if (idx3 < 0) return false;
+
+    freqOffsetPwm = constrain(params.substring(0, idx1).toInt(), -PWM_MAX, PWM_MAX);
+    freqAmplitudePwm = constrain(params.substring(idx1 + 1, idx2).toInt(), 0, PWM_MAX);
+    freqHz = params.substring(idx2 + 1, idx3).toFloat();
+    freqDurationMs = params.substring(idx3 + 1).toInt() * 1000UL;
+    return freqDurationMs > 0 && freqHz > 0.0f;
+}
+
+// =========================================================================
+//  loop
+// =========================================================================
 void loop() {
-	if (stepActive) {
-		if (Serial.available() > 0) {
-			String line = Serial.readStringUntil('\n');
-			line.trim();
-			if (line == "x" || line == "X") {
-				orchestrator.stop();
-				stepActive = false;
-				Serial.println("Teste cancelado. Envie 's' para iniciar novamente.");
-				return;
-			}
-		}
+    // Se um teste está ativo, continuá-lo
+    if (orchestrator.isRunning()) {
+        // Verifica comando de parada
+        if (Serial.available() > 0) {
+            char cmd = Serial.peek();
+            if (cmd == 'x' || cmd == 'X') {
+                Serial.read(); // consome o byte
+                orchestrator.stop();
+                activeTest = TEST_NONE;
+                return;
+            }
+        }
 
-		if (!orchestrator.runStepTest(STEP_PWM, STEP_DURATION_MS)) {
-			if (!stepLogOk) {
-				orchestrator.printInfos();
-			}
+        // Continua o teste ativo
+        if (activeTest == TEST_FREQ) {
+            if (!orchestrator.runFrequencyTest(freqOffsetPwm, freqAmplitudePwm, freqHz, freqDurationMs)) {
+                activeTest = TEST_NONE;
+            }
+        } else if (activeTest == TEST_STEP) {
+            if (!orchestrator.runStepTest(stepPwm, stepDurationMs)) {
+                activeTest = TEST_NONE;
+            }
+        }
+        return;
+    }
 
-			if (stepLogRequested) {
-				if (stepLogOk) {
-					Serial.println("Dados salvos em /step.txt");
-				} else {
-					Serial.println("Falha ao salvar /step.txt");
-				}
-				stepLogRequested = false;
-				stepLogOk = false;
-			}
+    // Nenhum teste ativo — aguarda comando
+    if (Serial.available() <= 0) return;
 
-			Serial.println("Teste finalizado. Envie 's' para iniciar novamente.");
-			stepActive = false;
-		}
-		return;
-	}
+    String line = Serial.readStringUntil('\n');
+    line.trim();
+    if (line.length() == 0) return;
 
-	if (Serial.available() <= 0) {
-		return;
-	}
+    char cmd = line.charAt(0);
 
-	String line = Serial.readStringUntil('\n');
-	line.trim();
-	if (line.isEmpty()) {
-		return;
-	}
-
-	if (line == "s" || line == "S") {
-		stepLogRequested = true;
-		if (spiffsOk) {
-			stepLogOk = orchestrator.startStepLog("/step.txt");
-			if (!stepLogOk) {
-				Serial.println("Falha ao abrir /step.txt");
-			}
-		} else {
-			stepLogOk = false;
-			Serial.println("SPIFFS indisponivel; log nao sera salvo.");
-		}
-		stepActive = true;
-		orchestrator.runStepTest(STEP_PWM, STEP_DURATION_MS);
-		return;
-	}
-
-	if (line == "d" || line == "D") {
-		if (!spiffsOk) {
-			Serial.println("SPIFFS indisponivel.");
-			return;
-		}
-
-		File file = SPIFFS.open("/step.txt", FILE_READ);
-		if (!file) {
-			Serial.println("Arquivo /step.txt nao encontrado.");
-			return;
-		}
-
-		Serial.println("---- /step.txt ----");
-		while (file.available()) {
-			Serial.write(file.read());
-		}
-		file.close();
-		Serial.println("\n---- fim ----");
-		return;
-	}
-
-	Serial.println("Envie 's' para iniciar o teste de degrau.");
+    if (cmd == 'f') {
+        // Frequência com parâmetros padrão
+        activeTest = TEST_FREQ;
+        orchestrator.runFrequencyTest(freqOffsetPwm, freqAmplitudePwm, freqHz, freqDurationMs);
+    } else if (cmd == 'F') {
+        // Frequência com parâmetros: F:offset,amplitude,freq,duracao
+        if (line.length() > 2 && line.charAt(1) == ':') {
+            if (parseFreqParams(line.substring(2))) {
+                activeTest = TEST_FREQ;
+                orchestrator.runFrequencyTest(freqOffsetPwm, freqAmplitudePwm, freqHz, freqDurationMs);
+            }
+        }
+    } else if (cmd == 's') {
+        // Degrau com parâmetros padrão
+        activeTest = TEST_STEP;
+        orchestrator.runStepTest(stepPwm, stepDurationMs);
+    } else if (cmd == 'S') {
+        // Degrau com parâmetros: S:pwm,duracao
+        if (line.length() > 2 && line.charAt(1) == ':') {
+            if (parseStepParams(line.substring(2))) {
+                activeTest = TEST_STEP;
+                orchestrator.runStepTest(stepPwm, stepDurationMs);
+            }
+        }
+    }
 }

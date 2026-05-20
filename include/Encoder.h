@@ -3,66 +3,43 @@
 
 #include "driver/pcnt.h"
 #include "driver/gpio.h"
-#include <Arduino.h> // Necessário para usar millis()
+#include <Arduino.h>
 #include <stdint.h>
 
-class Encoder{
+// =========================================================================
+//  ENCODER
+//  Lê pulsos do encoder via hardware (PCNT do ESP32) e calcula a
+//  velocidade angular em RPM. Aplica filtro de média móvel para
+//  suavizar leituras ruidosas do sensor.
+// =========================================================================
+
+class Encoder {
   private:
-    // Variáveis para o cálculo de velocidade (pulsos/s)
-    unsigned long lastTime;
-    // Contador acumulado de pulsos (corrige wrapping do contador PCNT)
-    int32_t accumulatedCount;
-    float currentVelocity;
-    pcnt_unit_t unit;
+    pcnt_unit_t unit;        // Unidade PCNT utilizada (hardware do ESP32)
+    int ppr;                 // Pulsos por revolução do encoder
+    int32_t accumulatedCount; // Contagem total acumulada de pulsos
+    unsigned long lastTime;  // Timestamp da última leitura (ms)
+    float rpm;               // Velocidade angular filtrada (RPM)
 
-    // Variáveis para o cálculo físico (m/s)
-    int ppr;              // Pulsos Por Revolução
-    float pps;            // Pulsos por Segundo
-    float rps;            // Rotações por Segundo
-    float circumference;  // Circunferência da roda em metros
-    float wheelRadius;    // Raio da roda em metros
-    float linearVelocity; // Velocidade Linear em m/s
-    float filteredLinearVelocity;
+    // Filtro de média móvel — suaviza picos de ruído no sinal do encoder
+    static constexpr size_t AVG_WINDOW = 5;  // Tamanho da janela
+    float avgBuffer[AVG_WINDOW];             // Buffer circular
+    size_t avgIndex;                         // Posição atual no buffer
+    size_t avgCount;                         // Amostras válidas acumuladas
+    float avgSum;                            // Soma das amostras na janela
 
-    // Simple moving average for the linear velocity
-    static constexpr size_t MOVING_AVG_WINDOW = 5;
-    float movingAvgBuffer[MOVING_AVG_WINDOW];
-    size_t movingAvgIndex;
-    size_t movingAvgCount;
-    float movingAvgSum;
+    // Lê o delta de pulsos desde a última chamada e zera o contador de hardware
+    int32_t readDelta();
 
-    // Configura o PCNT para ler os pulsos do encoder
-    int setupEncoder(pcnt_unit_t unit, pcnt_channel_t channel, int pinA, int pinB);
-    
-    // Configura as dimensões físicas do robô
-    void setPhysicalParameters(int pprValue, float radiusInMeters);
-
-    // Lê o contador bruto do PCNT
-    int16_t updateEncoder();
-
-    // Atualiza a contagem acumulada e devolve o delta bruto corrigido
-    int32_t refreshCount();
-
-    // Retorna a velocidade em Pulsos por Segundo (Hz)
-    float calcVelocity(); 
-
-    // Retorna a velocidade linear em Metros por Segundo (m/s)
-    void PsToMs(); 
-
-    // Aplica media movel na velocidade linear
-    float applyMovingAverage(float sample);
+    // Aplica média móvel sobre uma amostra bruta
+    float applyAvg(float sample);
 
   public:
-    Encoder(int pprValue, float radiusInMeters, pcnt_unit_t unit, pcnt_channel_t channel, int pinA, int pinB);
-    
-    //Retorna a velocidade linear calculada
-    float getLinearVelocity();
+    // Construtor: configura os pinos e o PCNT para leitura por hardware.
+    Encoder(int pprValue, pcnt_unit_t unit, pcnt_channel_t channel, int pinA, int pinB);
 
-    // Retorna a contagem acumulada de pulsos do encoder (corrige overflow)
-    int32_t getPulseCount();
-
-    // Zera a contagem de pulsos do encoder
-    void resetPulseCount();
+    // Retorna a velocidade angular atual em RPM (calcula e filtra a cada chamada)
+    float getRpm();
 };
 
 #endif // ENCODER_H
