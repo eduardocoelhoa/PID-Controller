@@ -18,6 +18,7 @@ Uso:
   python captura.py COM5                            # porta específica
   python captura.py --mode step --dur 5 --pwm 2048  # degrau, PWM 2048, 5s
   python captura.py --mode freq --freq 2.0 --amp 2048  # freq 2Hz, amp 2048
+  python captura.py --avg 10                          # janela média móvel = 10
 
 Parâmetros:
   --mode freq|step     Tipo de teste (padrão: freq)
@@ -26,6 +27,7 @@ Parâmetros:
   --offset N           Offset PWM para senoide (padrão: 0)
   --amp N              Amplitude PWM para senoide (padrão: 4095)
   --freq N             Frequência em Hz para senoide (padrão: 1.0)
+  --avg N              Tamanho da janela de média móvel do encoder (1-32)
 """
 
 import serial
@@ -99,7 +101,7 @@ def ler_pacote(ser):
     return (time_us, rpm, pwm)
 
 
-def executar_teste(porta, duracao_s, mode="freq", params=None):
+def executar_teste(porta, duracao_s, mode="freq", params=None, avg_window=None):
     """Executa o teste e retorna os dados capturados."""
     if params is None:
         params = {}
@@ -110,6 +112,13 @@ def executar_teste(porta, duracao_s, mode="freq", params=None):
 
     # Limpa buffer de entrada
     ser.reset_input_buffer()
+
+    # Envia configuração de janela de média móvel (se especificada)
+    if avg_window is not None:
+        cmd_avg = f"W:{avg_window}\n"
+        print(f"Configurando janela de média móvel: {avg_window}")
+        ser.write(cmd_avg.encode())
+        time.sleep(0.1)
 
     # Monta e envia comando com parâmetros
     if mode == "step":
@@ -220,6 +229,7 @@ def main():
     duracao = DEFAULT_DURATION_S
     mode = DEFAULT_MODE
     params = {}
+    avg_window = None
 
     args = sys.argv[1:]
     i = 0
@@ -245,6 +255,9 @@ def main():
         elif args[i] == "--freq" and i + 1 < len(args):
             params["freq"] = float(args[i + 1])
             i += 2
+        elif args[i] == "--avg" and i + 1 < len(args):
+            avg_window = int(args[i + 1])
+            i += 2
         elif not args[i].startswith("--"):
             porta = args[i]
             i += 1
@@ -259,7 +272,7 @@ def main():
             sys.exit(1)
         print(f"Porta detectada automaticamente: {porta}")
 
-    dados = executar_teste(porta, duracao, mode, params)
+    dados = executar_teste(porta, duracao, mode, params, avg_window)
 
     if dados:
         salvar_csv(dados)

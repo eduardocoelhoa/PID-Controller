@@ -2,17 +2,14 @@
 
 // =========================================================================
 //  Construtor
-//  Inicializa o Orchestrator com referências ao Encoder e Motor.
-//  Todos os flags de estado começam como "não executando".
 // =========================================================================
-Orchestrator::Orchestrator(Encoder& encoder, Motor& motor)
-    : encoder(encoder), motor(motor),
-      running(false), startUs(0), durationUs(0), lastSampleUs(0), currentPwm(0) {}
+Orchestrator::Orchestrator(Encoder& encoder, Motor& motor, CommandParser& parser)
+    : encoder(encoder), motor(motor), parser(parser),
+      activeMethod(METHOD_NONE), running(false),
+      startUs(0), durationUs(0), lastSampleUs(0), currentPwm(0) {}
 
 // =========================================================================
 //  beginTest
-//  Rotina comum de inicialização para qualquer tipo de teste.
-//  Marca o timestamp de início, configura a duração e aplica o PWM inicial.
 // =========================================================================
 void Orchestrator::beginTest(unsigned long durationMs, int pwm) {
     running = true;
@@ -25,14 +22,11 @@ void Orchestrator::beginTest(unsigned long durationMs, int pwm) {
 
 // =========================================================================
 //  endTest
-//  Finaliza o teste: envia um pacote especial com END_MARKER (0x7FFF) no
-//  campo de RPM para sinalizar ao Python que o teste terminou, depois
-//  para o motor.
 // =========================================================================
 void Orchestrator::endTest() {
     if (running) {
         uint32_t timeUs = micros() - startUs;
-        int16_t rpmEnd = END_MARKER;  // 0x7FFF = sinal de fim
+        int16_t rpmEnd = END_MARKER;
         int16_t pwm = static_cast<int16_t>(currentPwm);
         Serial.write(reinterpret_cast<const uint8_t*>(&timeUs), 4);
         Serial.write(reinterpret_cast<const uint8_t*>(&rpmEnd), 2);
@@ -44,10 +38,6 @@ void Orchestrator::endTest() {
 
 // =========================================================================
 //  sendSample
-//  Envia uma amostra binária via Serial (8 bytes, little-endian):
-//    [0-3] uint32_t tempo_us   — microsegundos desde o início do teste
-//    [4-5] int16_t  rpm_div2   — RPM / 2 (resolução 2 RPM, com sinal)
-//    [6-7] int16_t  pwm        — duty cycle aplicado
 // =========================================================================
 void Orchestrator::sendSample(unsigned long nowUs) {
     uint32_t timeUs = nowUs - startUs;
@@ -64,9 +54,6 @@ void Orchestrator::sendSample(unsigned long nowUs) {
 
 // =========================================================================
 //  tick
-//  Chamado a cada ciclo do loop durante um teste ativo.
-//  Se passou SAMPLE_PERIOD_US desde a última amostra, envia a amostra.
-//  Se a duração total do teste foi atingida, finaliza automaticamente.
 // =========================================================================
 void Orchestrator::tick() {
     unsigned long nowUs = micros();
@@ -81,56 +68,118 @@ void Orchestrator::tick() {
 }
 
 // =========================================================================
-//  runStepTest
-//  Executa um teste de degrau: aplica um PWM constante ao motor por
-//  uma duração determinada. Ideal para analisar a resposta transiente
-//  do sistema (tempo de subida, overshoot, regime permanente).
-//  Retorna true enquanto o teste estiver em execução.
+//  testMA
+//  Teste de malha aberta — degrau (s/S) e senoide (f/F).
+//  Chamada por update() tanto para iniciar quanto para continuar.
 // =========================================================================
-bool Orchestrator::runStepTest(int pwm, unsigned long durationMs) {
+void Orchestrator::testMA() {
     if (!running) {
-        beginTest(durationMs, pwm);
+        // Início do teste — parser já tem os parâmetros
+        if (parser.activeTest() == TEST_STEP) {
+            beginTest(parser.stepDurationMs(), parser.stepPwm());
+        } else if (parser.activeTest() == TEST_FREQ) {
+            beginTest(parser.freqDurationMs(), parser.freqOffsetPwm());
+        }
+        if (running) activeMethod = METHOD_MA;
     }
 
-    if (running) tick();
-    return running;
+    if (!running) return;
+
+    // Execução contínua
+    if (parser.activeTest() == TEST_FREQ) {
+        float tSec = static_cast<float>(micros() - startUs) / 1000000.0f;
+        float pwm = parser.freqOffsetPwm() + parser.freqAmplitudePwm() * sin(2.0f * PI * parser.freqHz() * tSec);
+        currentPwm = constrain(static_cast<int>(pwm), -PWM_MAX, PWM_MAX);
+        motor.setPwm(currentPwm);
+    }
+
+    tick();
+
+    if (!running) {
+        parser.setActiveTest(TEST_NONE);
+        activeMethod = METHOD_NONE;
+    }
 }
 
 // =========================================================================
-//  runFrequencyTest
-//  Executa um teste senoidal: o PWM varia como uma senoide em torno de
-//  um offset, simulando uma referência periódica. O sinal é:
-//    PWM(t) = offset + amplitude × sen(2π × freq × t)
-//  Limitado ao intervalo [-PWM_MAX, PWM_MAX]. Sinal negativo inverte a direção
-//  via ponte H (ver Motor::setPwm()).
+//  update
+//  Ponto de entrada: lê serial, despacha comandos.
 // =========================================================================
-bool Orchestrator::runFrequencyTest(int offsetPwm, int ampPwm, float freqHz, unsigned long durationMs) {
-    if (!running) {
-        beginTest(durationMs, offsetPwm);
-    }
-
+void Orchestrator::update() {
+    // Teste em execução — verifica parada, reconfiguração ou continua
     if (running) {
-        float tSec = static_cast<float>(micros() - startUs) / 1000000.0f;
-        float pwm = offsetPwm + ampPwm * sin(2.0f * PI * freqHz * tSec);
-        currentPwm = constrain(static_cast<int>(pwm), -PWM_MAX, PWM_MAX);
-        motor.setPwm(currentPwm);
-        tick();
+        if (Serial.available() > 0) {
+            char cmd = Serial.peek();
+            if (cmd == 'x' || cmd == 'X') {
+                Serial.read();
+                stop();
+                return;
+            }
+            // Permite W:<n> durante teste em execução
+            if (cmd == 'W') {
+                String line = Serial.readStringUntil('\n');
+                line.trim();
+                if (line.length() > 2 && line.charAt(1) == ':') {
+                    int window = line.substring(2).toInt();
+                    encoder.setAvgWindow(static_cast<size_t>(window));
+                }
+                return;
+            }
+        }
+        if (activeMethod == METHOD_MA) testMA();
+        // else if (activeMethod == METHOD_MF) testMF();
+        return;
     }
 
-    return running;
+    // Aguarda comando
+    if (Serial.available() <= 0) return;
+
+    String line = Serial.readStringUntil('\n');
+    line.trim();
+    if (line.length() == 0) return;
+
+    char cmd = line.charAt(0);
+
+    // Configuração de janela de média móvel: W:<n>
+    if (cmd == 'W' && line.length() > 2 && line.charAt(1) == ':') {
+        int window = line.substring(2).toInt();
+        encoder.setAvgWindow(static_cast<size_t>(window));
+        return;
+    }
+
+    // Malha aberta: s/S → degrau, f/F → senoide
+    if (cmd == 'f') {
+        parser.setActiveTest(TEST_FREQ);
+        testMA();
+    } else if (cmd == 'F' && line.length() > 2 && line.charAt(1) == ':') {
+        if (parser.parseFreqParams(line.substring(2))) {
+            parser.setActiveTest(TEST_FREQ);
+            testMA();
+        }
+    } else if (cmd == 's') {
+        parser.setActiveTest(TEST_STEP);
+        testMA();
+    } else if (cmd == 'S' && line.length() > 2 && line.charAt(1) == ':') {
+        if (parser.parseStepParams(line.substring(2))) {
+            parser.setActiveTest(TEST_STEP);
+            testMA();
+        }
+    }
+    // Malha fechada (futuro): adicionar comandos aqui
+    // else if (cmd == 'm') { ... testMF(); }
 }
 
 // =========================================================================
 //  stop
-//  Para qualquer teste em execução (interface pública).
 // =========================================================================
 void Orchestrator::stop() {
     endTest();
+    parser.setActiveTest(TEST_NONE);
+    activeMethod = METHOD_NONE;
 }
 
 // =========================================================================
 //  isRunning
-//  Retorna true se um teste estiver em andamento.
 // =========================================================================
 bool Orchestrator::isRunning() const {
     return running;

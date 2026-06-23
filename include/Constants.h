@@ -20,9 +20,11 @@ constexpr int PIN_ENC_A   = 32;   // Canal A do encoder (pulso)
 constexpr int PIN_ENC_B   = 33;   // Canal B do encoder (direção)
 
 // --- Encoder ---
-constexpr int PPR                     = 22;              // Pulsos por revolução do encoder
-constexpr pcnt_unit_t    PCNT_UNIT    = PCNT_UNIT_0;     // Unidade de contagem por hardware do ESP32
-constexpr pcnt_channel_t PCNT_CHANNEL = PCNT_CHANNEL_0;  // Canal do PCNT utilizado
+constexpr float REDUCTION_RATIO       = 34.02f;                             // Redução mecânica
+constexpr int ENCODER_PPR             = 22;                                 // Pulsos por revolução do encoder (PPR)
+constexpr int PPR                     = int(REDUCTION_RATIO * ENCODER_PPR); // Pulsos por revolução do encoder
+constexpr pcnt_unit_t    PCNT_UNIT    = PCNT_UNIT_0;                        // Unidade de contagem por hardware do ESP32
+constexpr pcnt_channel_t PCNT_CHANNEL = PCNT_CHANNEL_0;                     // Canal do PCNT utilizado
 
 // --- Comunicação Serial ---
 constexpr unsigned long BAUD_RATE = 1500000;  // 1.5 Mbaud — teste de velocidade máxima
@@ -32,7 +34,7 @@ constexpr int PWM_BITS = 12;                   // Resolução do PWM (bits)
 constexpr int PWM_MAX  = (1 << PWM_BITS) - 1;  // Valor máximo do PWM
 
 // --- Amostragem ---
-constexpr unsigned long SAMPLE_PERIOD_US = 60UL;  // Intervalo entre amostras (µs) → ~16.7 kHz
+constexpr unsigned long SAMPLE_PERIOD_US = 60UL;  // Intervalo entre amostras (µs) → 1/60µ ~ 16.7 kHz
 
 // --- Protocolo Binário ---
 // Formato por amostra (8 bytes, little-endian, sem sync marker):
@@ -40,6 +42,7 @@ constexpr unsigned long SAMPLE_PERIOD_US = 60UL;  // Intervalo entre amostras (�
 //   [4-5] int16_t  rpm_div2   — RPM / 2 (resolução de 2 RPM, com sinal)
 //   [6-7] int16_t  pwm        — duty cycle aplicado (-PWM_MAX a +PWM_MAX)
 // 8 bytes × ~16.7 kHz ≈ 133,000 bytes/s < 150,000 bytes/s (1.5 Mbaud 8N1)
+
 constexpr int16_t  END_MARKER  = 0x7FFF;  // Sinal de fim de teste (rpm_div2 = 0x7FFF)
 constexpr uint16_t PACKET_SIZE = 8;       // Tamanho fixo de cada pacote em bytes
 

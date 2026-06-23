@@ -9,9 +9,9 @@
 Encoder::Encoder(int pprValue, pcnt_unit_t unit, pcnt_channel_t channel, int pinA, int pinB)
     : unit(unit), ppr(pprValue),
       accumulatedCount(0), lastTime(0), rpm(0.0f),
-      avgIndex(0), avgCount(0), avgSum(0.0f) {
+      avgWindow(5), avgIndex(0), avgCount(0), avgSum(0.0f) {
 
-    for (size_t i = 0; i < AVG_WINDOW; ++i) avgBuffer[i] = 0.0f;
+    for (size_t i = 0; i < AVG_WINDOW_MAX; ++i) avgBuffer[i] = 0.0f;
 
     // Configura pinos como entrada digital com pull-up interno
     gpio_set_direction((gpio_num_t)pinA, GPIO_MODE_INPUT);
@@ -69,7 +69,7 @@ int32_t Encoder::readDelta() {
 //  sinal do encoder sem introduzir atraso significativo.
 // =========================================================================
 float Encoder::applyAvg(float sample) {
-    if (avgCount < AVG_WINDOW) {
+    if (avgCount < avgWindow) {
         // Ainda preenchendo o buffer — acumula sem remover nada
         avgBuffer[avgIndex] = sample;
         avgSum += sample;
@@ -80,7 +80,7 @@ float Encoder::applyAvg(float sample) {
         avgBuffer[avgIndex] = sample;
         avgSum += sample;
     }
-    avgIndex = (avgIndex + 1) % AVG_WINDOW;
+    avgIndex = (avgIndex + 1) % avgWindow;
     return avgSum / static_cast<float>(avgCount);
 }
 
@@ -105,4 +105,17 @@ float Encoder::getRpm() {
     }
 
     return rpm;
+}
+
+// =========================================================================
+//  setAvgWindow
+//  Define o tamanho da janela de média móvel. Reseta o filtro para
+//  evitar que amostras antigas contaminem a nova janela.
+// =========================================================================
+void Encoder::setAvgWindow(size_t window) {
+    avgWindow = constrain(static_cast<int>(window), 1, static_cast<int>(AVG_WINDOW_MAX));
+    avgIndex = 0;
+    avgCount = 0;
+    avgSum = 0.0f;
+    for (size_t i = 0; i < AVG_WINDOW_MAX; ++i) avgBuffer[i] = 0.0f;
 }

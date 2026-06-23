@@ -22,11 +22,12 @@ class Encoder {
     float rpm;               // Velocidade angular filtrada (RPM)
 
     // Filtro de média móvel — suaviza picos de ruído no sinal do encoder
-    static constexpr size_t AVG_WINDOW = 5;  // Tamanho da janela
-    float avgBuffer[AVG_WINDOW];             // Buffer circular
-    size_t avgIndex;                         // Posição atual no buffer
-    size_t avgCount;                         // Amostras válidas acumuladas
-    float avgSum;                            // Soma das amostras na janela
+    static constexpr size_t AVG_WINDOW_MAX = 32;  // Tamanho máximo do buffer
+    float avgBuffer[AVG_WINDOW_MAX];               // Buffer circular
+    size_t avgWindow;                              // Tamanho atual da janela
+    size_t avgIndex;                               // Posição atual no buffer
+    size_t avgCount;                               // Amostras válidas acumuladas
+    float avgSum;                                  // Soma das amostras na janela
 
     // Lê o delta de pulsos desde a última chamada e zera o contador de hardware
     int32_t readDelta();
@@ -40,6 +41,12 @@ class Encoder {
 
     // Retorna a velocidade angular atual em RPM (calcula e filtra a cada chamada)
     float getRpm();
+
+    // Define o tamanho da janela de média móvel (1 a AVG_WINDOW_MAX)
+    void setAvgWindow(size_t window);
+
+    // Retorna o tamanho atual da janela
+    size_t getAvgWindow() const { return avgWindow; }
 };
 
 #endif // ENCODER_H
