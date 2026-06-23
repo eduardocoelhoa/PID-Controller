@@ -1,93 +1,66 @@
 #include "Control.h"
-#include <Arduino.h>
 
-// =========================================================================
-//  Construtor
-//  Inicializa o controlador PID com os ganhos especificados e os limites
-//  de saída (por padrão, -4095 a +4095 para compatível com o PWM de 12 bits).
-// =========================================================================
-PIDController::PIDController(float kp, float ki, float kd, float outMin, float outMax)
-    : kp(kp), ki(ki), kd(kd),
-      setpoint(0.0f), integral(0.0f), prevError(0.0f), prevTimeUs(0),
-      outMin(outMin), outMax(outMax) {}
-
-// =========================================================================
-//  setTunings
-//  Atualiza os três ganhos do controlador em tempo de execução.
-//  Útil para ajuste fino via Serial ou interface.
-// =========================================================================
-void PIDController::setTunings(float kp, float ki, float kd) {
-    this->kp = kp;
-    this->ki = ki;
-    this->kd = kd;
+Control::Control(float kp, float ki, float kd) {
+    this->setpoint = 0.0f;
+    this->reset();
+    this->setTunings(kp, ki, kd);
 }
 
-// =========================================================================
-//  setSetpoint
-//  Define o valor desejado (setpoint). No contexto do motor, é o RPM alvo.
-// =========================================================================
-void PIDController::setSetpoint(float setpoint) {
-    this->setpoint = setpoint;
+void Control::setSetpoint(float sp) {
+    this->setpoint = sp;
 }
 
-// =========================================================================
-//  reset
-//  Zera o estado interno do controlador (integral e erro anterior).
-//  Deve ser chamado ao trocar de setpoint ou reiniciar um teste.
-// =========================================================================
-void PIDController::reset() {
-    integral = 0.0f;
-    prevError = 0.0f;
-    prevTimeUs = 0;
+void Control::setTunings(float kp, float ki, float kd) {
+    // Vamos usar q0, q1 e q2 para guardar nossos coeficientes fixos
+    // para Ts = 0.0006s e Filtro N = 100
+    this->q0 = 8.5180f;     // Coeficiente Proporcional
+    this->q1 = 0.1849f;     // Coeficiente Integral
+    this->q2 = 0.9417f;     // Coeficiente Derivativo 1 (Filtro)
 }
 
-// =========================================================================
-//  compute
-//  Calcula a ação de controle (saída PID) dado o valor medido atual.
-//
-//  Algoritmo:
-//    1. Calcula o erro:  e = setpoint - measurement
-//    2. Calcula dt (intervalo desde a última chamada em segundos)
-//    3. Acumula a integral:  I += e × dt
-//    4. Calcula a derivada:  D = (e - e_anterior) / dt
-//    5. Saída:  u = Kp×e + Ki×I + Kd×D
-//    6. Anti-windup: se a saída satura, desfaz o passo integral
-//
-//  Na primeira chamada (prevTimeUs == 0), retorna apenas Kp×e para
-//  evitar divisão por zero no cálculo de dt.
-// =========================================================================
-float PIDController::compute(float measurement) {
-    unsigned long nowUs = micros();
+void Control::reset() {
+    this->erro_k1 = 0.0f;
+    this->erro_k2 = 0.0f;
+    
+    // Agora essas variáveis guardam as memórias separadas, não a saída global!
+    this->saida_k1 = 0.0f;  // Atuará como memória da Integral (u_i[k-1])
+    this->saida_k2 = 0.0f;  // Atuará como memória da Derivativa (u_d[k-1])
+}
 
-    float error = setpoint - measurement;
+float Control::compute(float measured) {
+    float erro_atual = this->setpoint - measured;
 
-    // Primeira chamada: sem histórico → retorna apenas ação proporcional
-    if (prevTimeUs == 0) {
-        prevTimeUs = nowUs;
-        prevError = error;
-        return kp * error;
+    // ====================================================================
+    // 1. CÁLCULO SEPARADO DAS AÇÕES (Evita travamento matemático)
+    // ====================================================================
+    float u_p = this->q0 * erro_atual;
+    
+    // u_i = u_i_anterior + Ki_coef * (erro_atual + erro_anterior)
+    float u_i = this->saida_k1 + this->q1 * (erro_atual + this->erro_k1);
+    
+    // u_d = Kd_coef1 * u_d_anterior + Kd_coef2 * (erro_atual - erro_anterior)
+    float u_d = (this->q2 * this->saida_k2) + (2.8573f * (erro_atual - this->erro_k1));
+
+    // Soma das ações
+    float saida_atual = u_p + u_i + u_d;
+
+    // ====================================================================
+    // 2. SATURAÇÃO E ANTI-WINDUP
+    // ====================================================================
+    if (saida_atual > 4095.0f) {
+        saida_atual = 4095.0f;
+        u_i = this->saida_k1; // Congela a integral (Anti-windup)
+    } else if (saida_atual < 0.0f) {
+        saida_atual = 0.0f;
+        u_i = this->saida_k1; // Congela a integral (Anti-windup)
     }
 
-    // Calcula dt em segundos (com proteção contra valores <= 0)
-    float dt = static_cast<float>(nowUs - prevTimeUs) / 1000000.0f;
-    if (dt <= 0.0f) dt = 1e-6f;
+    // ====================================================================
+    // 3. ATUALIZAÇÃO DA MEMÓRIA
+    // ====================================================================
+    this->saida_k1 = u_i;  // Salva o estado da integral
+    this->saida_k2 = u_d;  // Salva o estado da derivativa
+    this->erro_k1 = erro_atual;
 
-    // Termos PID
-    float derivative = (error - prevError) / dt;
-    integral += error * dt;
-    float output = kp * error + ki * integral + kd * derivative;
-
-    // Anti-windup por clamping: se a saída saturou, desfaz o acúmulo integral
-    if (output > outMax) {
-        output = outMax;
-        if (error > 0) integral -= error * dt;
-    } else if (output < outMin) {
-        output = outMin;
-        if (error < 0) integral -= error * dt;
-    }
-
-    prevError = error;
-    prevTimeUs = nowUs;
-
-    return output;
+    return saida_atual;
 }

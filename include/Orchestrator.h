@@ -5,10 +5,11 @@
 #include "Motor.h"
 #include "CommandParser.h"
 #include "Constants.h"
+#include "Control.h"
 #include <Arduino.h>
 
 // Método de teste ativo — permite que update() despache para o correto
-enum TestMethod { METHOD_NONE, METHOD_MA };
+enum TestMethod { METHOD_NONE, METHOD_MA, METHOD_MF };
 
 // =========================================================================
 //  ORCHESTRATOR
@@ -25,6 +26,8 @@ class Orchestrator {
     Encoder& encoder;
     Motor& motor;
     CommandParser& parser;
+    Control control;
+
 
     // Estado do teste
     TestMethod activeMethod;
@@ -32,10 +35,13 @@ class Orchestrator {
     unsigned long startUs;
     unsigned long durationUs;
     unsigned long lastSampleUs;
+    unsigned long lastControlUs;
     int currentPwm;
+    float currentSetpointRpm;
 
     // Primitivas internas
     void beginTest(unsigned long durationMs, int pwm);
+    void beginClosedLoopTest(unsigned long durationMs, float setpointRpm);
     void endTest();
     void sendSample(unsigned long nowUs);
     void tick();
@@ -49,12 +55,16 @@ class Orchestrator {
     // Teste de malha aberta (degrau e senoide)
     // Comandos: s/S → degrau, f/F → senoide
     void testMA();
+    void testMF();
 
     // Para qualquer teste em execução
     void stop();
 
     // Retorna true se um teste estiver em andamento
     bool isRunning() const;
+
+    // Simula a resposta de um sistema de malha fechada a um degrau
+    void simulateClosedLoopStepResponse(float step_target, int num_samples);
 };
 
 #endif // ORCHESTRATOR_H

@@ -5,7 +5,7 @@
 #include "Constants.h"
 
 // Tipo de teste ativo
-enum TestType { TEST_NONE, TEST_FREQ, TEST_STEP };
+enum TestType { TEST_NONE, TEST_FREQ, TEST_STEP, TEST_CLOSED_LOOP };
 
 class CommandParser {
 public:
@@ -24,6 +24,8 @@ public:
     int freqAmplitudePwm() const { return _freqAmplitudePwm; }
     float freqHz() const { return _freqHz; }
     unsigned long freqDurationMs() const { return _freqDurationMs; }
+    float closedLoopSetpointRpm() const { return _closedLoopSetpointRpm; }
+    unsigned long closedLoopDurationMs() const { return _closedLoopDurationMs; }
 
     // Define o teste ativo
     void setActiveTest(TestType type) { _activeTest = type; }
@@ -33,6 +35,7 @@ public:
 
     // Parseia parâmetros de frequência a partir de "offset,amplitude,freq,duracao"
     bool parseFreqParams(const String& params);
+    bool parseClosedLoopParams(const String& params);
 
 private:
     TestType _activeTest;
@@ -46,6 +49,8 @@ private:
     int _freqAmplitudePwm;
     float _freqHz;
     unsigned long _freqDurationMs;
+    float _closedLoopSetpointRpm;
+    unsigned long _closedLoopDurationMs;
 };
 
 #endif // COMMAND_PARSER_H

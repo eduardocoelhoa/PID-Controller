@@ -8,6 +8,8 @@ CommandParser::CommandParser()
     , _freqAmplitudePwm(AMPLITUDE_PWM)
     , _freqHz(FREQ_HZ)
     , _freqDurationMs(FREQ_DURATION_MS)
+    , _closedLoopSetpointRpm(STEP_TARGET_RPM)
+    , _closedLoopDurationMs(CLOSED_LOOP_DURATION_MS)
 {}
 
 bool CommandParser::parseStepParams(const String& params) {
@@ -33,4 +35,13 @@ bool CommandParser::parseFreqParams(const String& params) {
     _freqHz = params.substring(idx2 + 1, idx3).toFloat();
     _freqDurationMs = params.substring(idx3 + 1).toInt() * 1000UL;
     return _freqDurationMs > 0 && _freqHz > 0.0f;
+}
+
+bool CommandParser::parseClosedLoopParams(const String& params) {
+    int commaIdx = params.indexOf(',');
+    if (commaIdx < 0) return false;
+
+    _closedLoopSetpointRpm = params.substring(0, commaIdx).toFloat();
+    _closedLoopDurationMs = params.substring(commaIdx + 1).toInt() * 1000UL;
+    return _closedLoopSetpointRpm > 0.0f && _closedLoopDurationMs > 0;
 }

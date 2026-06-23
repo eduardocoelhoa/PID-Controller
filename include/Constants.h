@@ -54,6 +54,19 @@ constexpr unsigned long FREQ_DURATION_MS  = 10000UL;  // Duração total do test
 
 // --- Teste de Degrau ---
 constexpr int           STEP_PWM          = PWM_MAX;  // PWM constante aplicado no degrau
-constexpr unsigned long STEP_DURATION_MS  = 10000UL;  // Duração total do teste de degrau (ms)
+constexpr unsigned long STEP_DURATION_MS  = 10000UL;  // Duração total do teste de degrau (ms)4
+
+// --- Teste de Malha Fechada (Simulado) ---
+
+constexpr float STEP_TARGET_RPM = 100.0f;  // RPM alvo do degrau de referência
+constexpr int   STEP_SAMPLES    = 500;     // Número de amostras a coletar (20ms cada → 10s total)
+constexpr unsigned long CONTROL_PERIOD_US = 20000UL;  // Periodo de controle da malha fechada (20 ms)
+constexpr unsigned long CLOSED_LOOP_DURATION_MS = (static_cast<unsigned long>(STEP_SAMPLES) * CONTROL_PERIOD_US) / 1000UL;
+
+constexpr float Kp  = 8.5180f;  
+constexpr float Ki  = 616.3596f; 
+constexpr float Kd  = 0.02943f; 
+
+
 
 #endif // CONSTANTS_H

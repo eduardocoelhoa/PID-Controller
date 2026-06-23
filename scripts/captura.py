@@ -18,15 +18,17 @@ Uso:
   python captura.py COM5                            # porta específica
   python captura.py --mode step --dur 5 --pwm 2048  # degrau, PWM 2048, 5s
   python captura.py --mode freq --freq 2.0 --amp 2048  # freq 2Hz, amp 2048
+  python captura.py --mode closed --setpoint 100 --dur 10  # malha fechada
   python captura.py --avg 10                          # janela média móvel = 10
 
 Parâmetros:
-  --mode freq|step     Tipo de teste (padrão: freq)
+  --mode freq|step|closed|mf Tipo de teste (padrão: freq)
   --dur N              Duração em segundos (padrão: 30)
   --pwm N              PWM para teste de degrau (padrão: 4095)
   --offset N           Offset PWM para senoide (padrão: 0)
   --amp N              Amplitude PWM para senoide (padrão: 4095)
   --freq N             Frequência em Hz para senoide (padrão: 1.0)
+  --setpoint N         Referencia de RPM para malha fechada (padrão: 100)
   --avg N              Tamanho da janela de média móvel do encoder (1-32)
 """
 
@@ -54,6 +56,7 @@ DEFAULT_STEP_PWM = 4095
 DEFAULT_FREQ_OFFSET = 0
 DEFAULT_FREQ_AMP = 4095
 DEFAULT_FREQ_HZ = 1.0
+DEFAULT_CLOSED_SETPOINT_RPM = 100.0
 
 
 # VIDs/PIDs comuns de placas ESP32
@@ -126,6 +129,11 @@ def executar_teste(porta, duracao_s, mode="freq", params=None, avg_window=None):
         cmd = f"S:{pwm},{int(duracao_s)}\n"
         print(f"Enviando comando de degrau: PWM={pwm}, duração={duracao_s}s")
         ser.write(cmd.encode())
+    elif mode in ("closed", "mf"):
+        setpoint = params.get("setpoint", DEFAULT_CLOSED_SETPOINT_RPM)
+        cmd = f"M:{setpoint:.2f},{int(duracao_s)}\n"
+        print(f"Enviando comando de malha fechada: setpoint={setpoint} RPM, duracao={duracao_s}s")
+        ser.write(cmd.encode())
     else:
         offset = params.get("offset", DEFAULT_FREQ_OFFSET)
         amp = params.get("amp", DEFAULT_FREQ_AMP)
@@ -174,17 +182,22 @@ def executar_teste(porta, duracao_s, mode="freq", params=None, avg_window=None):
     return dados
 
 
-def salvar_csv(dados, nome_arquivo="dados.csv"):
+def salvar_csv(dados, nome_arquivo="dados.csv", mode="freq", setpoint=None):
     """Salva os dados em formato CSV."""
     with open(nome_arquivo, 'w', newline='') as f:
         writer = csv.writer(f)
-        writer.writerow(["tempo_ms", "rpm", "pwm"])
-        for time_us, rpm, pwm in dados:
-            writer.writerow([f"{time_us / 1000.0:.3f}", f"{rpm:.2f}", pwm])
+        if mode in ("closed", "mf") and setpoint is not None:
+            writer.writerow(["tempo_ms", "setpoint_rpm", "rpm", "pwm"])
+            for time_us, rpm, pwm in dados:
+                writer.writerow([f"{time_us / 1000.0:.3f}", f"{setpoint:.2f}", f"{rpm:.2f}", pwm])
+        else:
+            writer.writerow(["tempo_ms", "rpm", "pwm"])
+            for time_us, rpm, pwm in dados:
+                writer.writerow([f"{time_us / 1000.0:.3f}", f"{rpm:.2f}", pwm])
     print(f"Dados salvos em {nome_arquivo}")
 
 
-def plotar(dados, mode="freq"):
+def plotar(dados, mode="freq", setpoint=None):
     """Gera gráfico de RPM e PWM ao longo do tempo."""
     if not dados:
         print("Sem dados para plotar.")
@@ -204,11 +217,19 @@ def plotar(dados, mode="freq"):
 
     plt.rcParams["agg.path.chunksize"] = 10000
 
-    titulo = "Resposta do Motor — Teste de Degrau" if mode == "step" else "Resposta do Motor — Teste de Frequência"
+    if mode == "step":
+        titulo = "Resposta do Motor - Teste de Degrau"
+    elif mode in ("closed", "mf"):
+        titulo = "Resposta do Motor - Malha Fechada"
+    else:
+        titulo = "Resposta do Motor - Teste de Frequencia"
 
     fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True, figsize=(12, 6))
 
     ax1.plot(tempo_ms, rpm, 'b-', linewidth=0.5)
+    if mode in ("closed", "mf") and setpoint is not None:
+        ax1.axhline(setpoint, color='g', linestyle='--', linewidth=1.0, label="Setpoint")
+        ax1.legend(loc="best")
     ax1.set_ylabel("RPM")
     ax1.set_title(titulo)
     ax1.grid(True, alpha=0.3)
@@ -221,6 +242,7 @@ def plotar(dados, mode="freq"):
     plt.tight_layout()
     plt.savefig("dados.png", dpi=150)
     print("Gráfico salvo em dados.png")
+    plt.show()
 
 
 def main():
@@ -234,35 +256,39 @@ def main():
     args = sys.argv[1:]
     i = 0
     while i < len(args):
-        if args[i] == "--dur" and i + 1 < len(args):
+        if args[i] in ("--dur", "-dur") and i + 1 < len(args):
             duracao = float(args[i + 1])
             i += 2
-        elif args[i] == "--mode" and i + 1 < len(args):
+        elif args[i] in ("--mode", "-mode") and i + 1 < len(args):
             mode = args[i + 1].lower()
-            if mode not in ("freq", "step"):
-                print(f"Modo inválido: {mode}. Use 'freq' ou 'step'.")
+            if mode not in ("freq", "step", "closed", "mf"):
+                print(f"Modo invalido: {mode}. Use 'freq', 'step', 'closed' ou 'mf'.")
                 sys.exit(1)
             i += 2
-        elif args[i] == "--pwm" and i + 1 < len(args):
+        elif args[i] in ("--pwm", "-pwm") and i + 1 < len(args):
             params["pwm"] = int(args[i + 1])
             i += 2
-        elif args[i] == "--offset" and i + 1 < len(args):
+        elif args[i] in ("--offset", "-offset") and i + 1 < len(args):
             params["offset"] = int(args[i + 1])
             i += 2
-        elif args[i] == "--amp" and i + 1 < len(args):
+        elif args[i] in ("--amp", "-amp") and i + 1 < len(args):
             params["amp"] = int(args[i + 1])
             i += 2
-        elif args[i] == "--freq" and i + 1 < len(args):
+        elif args[i] in ("--freq", "-freq") and i + 1 < len(args):
             params["freq"] = float(args[i + 1])
             i += 2
-        elif args[i] == "--avg" and i + 1 < len(args):
+        elif args[i] in ("--setpoint", "-setpoint") and i + 1 < len(args):
+            params["setpoint"] = float(args[i + 1])
+            i += 2
+        elif args[i] in ("--avg", "-avg") and i + 1 < len(args):
             avg_window = int(args[i + 1])
             i += 2
-        elif not args[i].startswith("--"):
+        elif not args[i].startswith("-"):
             porta = args[i]
             i += 1
         else:
-            i += 1
+            print(f"Argumento invalido ou incompleto: {args[i]}")
+            sys.exit(1)
 
     if porta is None:
         porta = encontrar_porta()
@@ -275,8 +301,9 @@ def main():
     dados = executar_teste(porta, duracao, mode, params, avg_window)
 
     if dados:
-        salvar_csv(dados)
-        plotar(dados, mode)
+        setpoint = params.get("setpoint", DEFAULT_CLOSED_SETPOINT_RPM) if mode in ("closed", "mf") else None
+        salvar_csv(dados, mode=mode, setpoint=setpoint)
+        plotar(dados, mode, setpoint)
     else:
         print("Nenhum dado capturado.")
 
