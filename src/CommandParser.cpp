@@ -2,15 +2,17 @@
 
 CommandParser::CommandParser()
     : _activeTest(TEST_NONE)
-    , _stepPwm(STEP_PWM)
-    , _stepDurationMs(STEP_DURATION_MS)
-    , _freqOffsetPwm(OFFSET_PWM)
-    , _freqAmplitudePwm(AMPLITUDE_PWM)
-    , _freqHz(FREQ_HZ)
-    , _freqDurationMs(FREQ_DURATION_MS)
-    , _closedLoopSetpointRpm(STEP_TARGET_RPM)
-    , _closedLoopDurationMs(CLOSED_LOOP_DURATION_MS)
+    , _stepPwm(0)                     // Substituído: STEP_PWM
+    , _stepDurationMs(0)              // Substituído: STEP_DURATION_MS
+    , _freqOffsetPwm(0)               // Substituído: OFFSET_PWM
+    , _freqAmplitudePwm(0)            // Substituído: AMPLITUDE_PWM
+    , _freqHz(0.0f)                   // Substituído: FREQ_HZ
+    , _freqDurationMs(0)              // Substituído: FREQ_DURATION_MS
+    , _closedLoopSetpointRpm(DEFAULT_TARGET_RPM) // Usando constante válida do Constants.h
+    , _closedLoopDurationMs(DEFAULT_DURATION_MS) // Usando constante válida do Constants.h
 {}
+
+// ... resto do seu código (parseStepParams, parseFreqParams, etc) continua igual
 
 bool CommandParser::parseStepParams(const String& params) {
     int commaIdx = params.indexOf(',');

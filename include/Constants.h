@@ -1,8 +1,6 @@
 #ifndef CONSTANTS_H
 #define CONSTANTS_H
 
-#include "driver/pcnt.h"
-
 // =========================================================================
 //  CONSTANTES DO PROJETO — Controle de Motor DC com Encoder
 //  Centraliza todas as configurações de hardware e parâmetros de teste.
@@ -16,18 +14,10 @@ constexpr int PIN_DIR2    = 18;   // Pino de direção 2 (ponte H)
 constexpr int PWM_CHANNEL = 0;    // Canal LEDC do ESP32 para gerar o PWM
 
 // --- Pinos do Encoder ---
-constexpr int PIN_ENC_A   = 32;   // Canal A do encoder (pulso)
-constexpr int PIN_ENC_B   = 33;   // Canal B do encoder (direção)
-
-// --- Encoder ---
-constexpr float REDUCTION_RATIO       = 34.02f;                             // Redução mecânica
-constexpr int ENCODER_PPR             = 22;                                 // Pulsos por revolução do encoder (PPR)
-constexpr int PPR                     = int(REDUCTION_RATIO * ENCODER_PPR); // Pulsos por revolução do encoder
-constexpr pcnt_unit_t    PCNT_UNIT    = PCNT_UNIT_0;                        // Unidade de contagem por hardware do ESP32
-constexpr pcnt_channel_t PCNT_CHANNEL = PCNT_CHANNEL_0;                     // Canal do PCNT utilizado
+constexpr int PIN_ENC_A = 32;   // Canal A do encoder (pulso)
 
 // --- Comunicação Serial ---
-constexpr unsigned long BAUD_RATE = 1500000;  // 1.5 Mbaud — teste de velocidade máxima
+constexpr unsigned long BAUD_RATE = 115200;
 
 // --- PWM ---
 constexpr int PWM_BITS = 12;                   // Resolução do PWM (bits)
@@ -43,30 +33,19 @@ constexpr unsigned long SAMPLE_PERIOD_US = 60UL;  // Intervalo entre amostras (�
 //   [6-7] int16_t  pwm        — duty cycle aplicado (-PWM_MAX a +PWM_MAX)
 // 8 bytes × ~16.7 kHz ≈ 133,000 bytes/s < 150,000 bytes/s (1.5 Mbaud 8N1)
 
-constexpr int16_t  END_MARKER  = 0x7FFF;  // Sinal de fim de teste (rpm_div2 = 0x7FFF)
-constexpr uint16_t PACKET_SIZE = 8;       // Tamanho fixo de cada pacote em bytes
+constexpr int16_t END_MARKER = 0x7FFF;  // Sinal de fim de teste (rpm_div2 = 0x7FFF)
+constexpr uint16_t PACKET_SIZE = 8;    // Tamanho fixo de cada pacote em bytes
 
-// --- Teste de Frequência (Senoide) ---
-constexpr int           OFFSET_PWM        = 0;        // Centro da senoide (0 = bipolar)
-constexpr int           AMPLITUDE_PWM     = PWM_MAX;  // Amplitude da senoide em torno do offset
-constexpr float         FREQ_HZ           = 1.0f;     // Frequência do sinal senoidal (Hz)
-constexpr unsigned long FREQ_DURATION_MS  = 10000UL;  // Duração total do teste (ms)
+// --- Teste de Malha Fechada ---
+constexpr float DEFAULT_TARGET_RPM = 100.0f;    // RPM alvo padrão para o teste
+constexpr unsigned long DEFAULT_DURATION_MS = 10000UL; // Duração padrão do teste (10s)
 
-// --- Teste de Degrau ---
-constexpr int           STEP_PWM          = PWM_MAX;  // PWM constante aplicado no degrau
-constexpr unsigned long STEP_DURATION_MS  = 10000UL;  // Duração total do teste de degrau (ms)4
-
-// --- Teste de Malha Fechada (Simulado) ---
-
-constexpr float STEP_TARGET_RPM = 100.0f;  // RPM alvo do degrau de referência
-constexpr int   STEP_SAMPLES    = 500;     // Número de amostras a coletar (20ms cada → 10s total)
 constexpr unsigned long CONTROL_PERIOD_US = 20000UL;  // Periodo de controle da malha fechada (20 ms)
-constexpr unsigned long CLOSED_LOOP_DURATION_MS = (static_cast<unsigned long>(STEP_SAMPLES) * CONTROL_PERIOD_US) / 1000UL;
 
+// Ganhos do controlador PID.
+// ATENÇÃO: Estes valores podem precisar de ajuste para o novo controlador simplificado.
 constexpr float Kp  = 8.5180f;  
 constexpr float Ki  = 616.3596f; 
 constexpr float Kd  = 0.02943f; 
-
-
 
 #endif // CONSTANTS_H
